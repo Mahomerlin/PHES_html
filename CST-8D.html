@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Circle Stacking Test-8D</title>
+  <subtitle>yyy 2025-01-14</subtitle>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+      user-select: none; /* 禁用文字选中，避免拖拽时选中文字 */
+    }
+
+    h1 {
+      margin: 16px 0;
+    }
+
+    #background {
+      width: 85vmin;
+      height: 85vmin;
+      border: 2px solid #000;
+      position: relative;
+      background-color: #fff;
+      margin-top: 16px;
+    }
+
+    .circle {
+      position: absolute;
+      border: 6px solid black;
+      border-radius: 50%;
+      background-color: transparent;
+      cursor: grab; /* 鼠标样式 */
+    }
+
+    /* 被拖拽时的鼠标样式 */
+    .circle:active {
+      cursor: grabbing;
+    }
+
+    /* AssistRing 的示例样式：红色虚线 */
+    .assist-ring {
+      position: absolute;
+      border: 3px dashed rgb(162, 159, 159);
+      border-radius: 50%;
+      background-color: transparent;
+      pointer-events: none; /* 不阻塞鼠标事件 */
+      opacity: 0.7;        /* 半透明效果 */
+    }
+
+    #refresh-btn {
+      margin-top: 16px;
+      padding: 10px 20px;
+      font-size: 1rem;
+      cursor: pointer;
+      border: 1px solid #000;
+      background-color: #fff;
+      transition: background-color 0.3s, transform 0.3s;
+    }
+
+    #refresh-btn:hover {
+      background-color: #ddd;
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+  <h1>Circle Stacking Test-8D</h1>
+  <div id="background"></div>
+  <button id="refresh-btn">重新生成</button>
+
+  <script>
+    // ============ 配置信息 ============
+    const totalCircles = 8;
+    const baseDiameter = 5; // Diameter of C1 in vmin
+    const minScale = 1.2;
+    const maxScale = 1.35;
+
+    // 用于交互操作的全局变量
+    let circlesData = [];    // 存储所有圆环的数据 { id, element, x, y, diameter }
+    let isDragging = false;  // 标记是否正在拖拽
+    let basicRing = null;    // 当前被拖拽的圆环信息
+    let assistRing = null;   // 红色虚线圆
+    let offsetX = 0;         // 鼠标与圆心的水平偏移
+    let offsetY = 0;         // 鼠标与圆心的垂直偏移
+
+    // 记录操作信息
+    let operationRecords = [];    // 存储所有后台记录
+    let firstOperationTime = null; // 用于计算每次操作与第一次操作的时间差
+
+    // ============ 获取DOM ============
+    const background = document.getElementById('background');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    // ================= 工具函数 =================
+
+    // 返回 min ~ max 的随机数
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    // 判断是否重叠
+    function isOverlapping(x, y, diameter, existingCircles) {
+      const radius = diameter / 2;
+      return existingCircles.some(c => {
+        const dist = Math.sqrt((c.x - x) ** 2 + (c.y - y) ** 2);
+        return dist < radius + c.diameter / 2;
+      });
+    }
+
+    // 计算两圆心之间的距离
+    function distance(x1, y1, x2, y2) {
+      return Math.sqrt((x1 - x2)**2 + (y1 - y2)**2);
+    }
+
+    // 计算两圆的交叠面积
+    // 参考公式: https://mathworld.wolfram.com/Circle-CircleIntersection.html
+    function circleIntersectionArea(r1, r2, d) {
+      // 若不相交或一方包含另一方，也可直接早退判断
+      if (d >= r1 + r2) {
+        // 互不相交
+        return 0;
+      }
+      if (d <= Math.abs(r1 - r2)) {
+        // 小圆完全被大圆包含
+        return Math.PI * Math.min(r1, r2)**2;
+      }
+      // 一般相交情形
+      const r1Sq = r1*r1;
+      const r2Sq = r2*r2;
+      const alpha = Math.acos((d*d + r1Sq - r2Sq) / (2*d*r1)) * 2;
+      const beta  = Math.acos((d*d + r2Sq - r1Sq) / (2*d*r2)) * 2;
+      const area1 = 0.5 * r1Sq * (alpha - Math.sin(alpha));
+      const area2 = 0.5 * r2Sq * (beta - Math.sin(beta));
+      return area1 + area2;
+    }
+
+    // 在后台记录一条操作
+    function recordOperation(message) {
+      const now = new Date().getTime();
+      if (!firstOperationTime) {
+        firstOperationTime = now; // 第一次操作时标记
+      }
+      const timeDiff = (now - firstOperationTime) / 1000; // 与第一次操作的时间差，单位秒
+      // 格式化，保留 2 位小数
+      const recordTime = timeDiff.toFixed(2) + 's';
+      operationRecords.push(`[${recordTime}] ${message}`);
+    }
+
+    // 根据 circlesData 的索引生成名称: C1, C2, ...
+    function getCircleName(index) {
+      return `C${index+1}`;
+    }
+
+    // 检测当前还剩多少个圆
+    function checkRemainingCircles() {
+      if (circlesData.length === 1) {
+        // 只剩最后一个圆环 -> 结束
+        endInteraction();
+      }
+    }
+
+    // ================ 计分系统 + 额外扣分逻辑 =================
+    function calculateScore() {
+      let score = 0;
+
+      // ========== 1) 先按原规则计算得分 (吞并/抵抗/相邻编号等) ==========
+      for (let record of operationRecords) {
+        // record示例: "[3.45s] C2 --> C1"
+        const bracketIdx = record.indexOf(']');
+        if (bracketIdx < 0) continue;
+        const content = record.slice(bracketIdx + 2).trim(); 
+        // content 可能是 "C2 --> C1" 或 "C3 <-- C2" 或 "C4 --X" 等
+
+        if (content.includes('-->')) {
+          // 吞并
+          const parts = content.split('-->');
+          if (parts.length === 2) {
+            const left  = parts[0].trim(); // e.g. "C2"
+            const right = parts[1].trim(); // e.g. "C1"
+            const leftNum  = parseInt(left.slice(1));   // 2
+            const rightNum = parseInt(right.slice(1));  // 1
+            const diff = Math.abs(leftNum - rightNum);
+            if (diff === 1) {
+              score += 2; // 编号相邻 +2
+            } else {
+              score += 1; // 不相邻 +1
+            }
+          }
+        } else if (content.includes('<--')) {
+          // 抵抗
+          score -= 1;
+        } 
+        // "--X" 或其他情况不加不减
+      }
+
+      // ========== 2) 基于“记录最后两个字符”做额外扣分 ==========
+      //    若某个后缀（例如 "C1"）出现次数≥3，则从第3次起，每多1次扣0.3分
+      let suffixCounts = {};
+
+      for (let record of operationRecords) {
+        const bracketIdx = record.indexOf(']');
+        if (bracketIdx < 0) continue;
+        const content = record.slice(bracketIdx + 2).trim();
+
+        // 截取最后两个字符
+        if (content.length >= 2) {
+          let suffix = content.slice(-2); 
+          // 计数
+          suffixCounts[suffix] = (suffixCounts[suffix] || 0) + 1;
+        }
+      }
+
+      // 针对出现次数大于2的后缀做扣分
+      for (let key in suffixCounts) {
+        let count = suffixCounts[key];
+        if (count > 2) {
+          let extra = count - 2;  // 超出 2 次的部分
+          score -= (extra * 0.3);
+        }
+      }
+
+      return score;
+    }
+
+    // 结束时输出后台记录 + 计算总分
+    function endInteraction() {
+      const finalScore = calculateScore();
+
+      // 输出后台记录
+      let msg = '只剩下最大的圆环，交互结束！\n\n';
+      msg += '后台记录如下(也打印在控制台):\n' + operationRecords.join('\n');
+      msg += '\n\n本次得分：' + finalScore.toFixed(2);
+
+      alert(msg);
+
+      console.log('==== 后台记录 ====');
+      operationRecords.forEach(r => console.log(r));
+      console.log('==== 最终得分 ====', finalScore);
+    }
+
+    // ================== 核心流程：生成圆 & 拖拽交互 ==================
+
+    // 生成圆环
+    function generateCircles() {
+      // 清空操作记录、全局状态
+      operationRecords = [];
+      firstOperationTime = null;
+
+      background.innerHTML = ''; // 清空DOM
+      circlesData = [];
+
+      const containerSize = background.clientWidth;
+      // 计算所有圆环的直径
+      let diameters = [baseDiameter * (containerSize / 100)]; // 初始直径
+      for (let i = 1; i < totalCircles; i++) {
+        const scale = randomInRange(minScale, maxScale);
+        diameters.push(diameters[i - 1] * scale);
+      }
+
+      // 生成圆环，确保不重叠
+      let attempts = 0;
+      while (circlesData.length < totalCircles && attempts < 10000) {
+        attempts++;
+        const d = diameters[circlesData.length];
+        const x = randomInRange(d/2, containerSize - d/2);
+        const y = randomInRange(d/2, containerSize - d/2);
+
+        if (!isOverlapping(x, y, d, circlesData)) {
+          const circleEl = document.createElement('div');
+          circleEl.className = 'circle';
+          circleEl.style.width  = d + 'px';
+          circleEl.style.height = d + 'px';
+          circleEl.style.left   = (x - d/2) + 'px';
+          circleEl.style.top    = (y - d/2) + 'px';
+          background.appendChild(circleEl);
+
+          // 给每个圆环添加 mousedown 事件
+          circleEl.addEventListener('mousedown', onCircleMouseDown);
+
+          circlesData.push({
+            id: circlesData.length, // 0~7
+            element: circleEl,
+            x: x,            // 圆心坐标
+            y: y,
+            diameter: d
+          });
+        }
+      }
+
+      if (circlesData.length < totalCircles) {
+        alert('无法生成足够的圆环，请刷新重试。');
+      }
+    }
+
+    // 当用户按下某个圆环时
+    function onCircleMouseDown(e) {
+      e.preventDefault();
+      if (isDragging) return;
+
+      const targetEl = e.currentTarget;
+      const ringData = circlesData.find(cd => cd.element === targetEl);
+      if (!ringData) return;
+
+      isDragging = true;
+      basicRing = ringData;
+
+      // 计算鼠标与圆心的偏移量
+      const rect = background.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      offsetX = mouseX - basicRing.x;
+      offsetY = mouseY - basicRing.y;
+
+      // 创建 AssistRing
+      assistRing = document.createElement('div');
+      assistRing.className = 'assist-ring';
+      assistRing.style.width  = basicRing.diameter + 'px';
+      assistRing.style.height = basicRing.diameter + 'px';
+      assistRing.style.left   = (basicRing.x - basicRing.diameter/2) + 'px';
+      assistRing.style.top    = (basicRing.y - basicRing.diameter/2) + 'px';
+      background.appendChild(assistRing);
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    }
+
+    // 拖拽移动中
+    function onMouseMove(e) {
+      if (!isDragging || !assistRing) return;
+
+      const rect = background.getBoundingClientRect();
+      let mouseX = e.clientX - rect.left;
+      let mouseY = e.clientY - rect.top;
+
+      let newX = mouseX - offsetX;
+      let newY = mouseY - offsetY;
+
+      const r = basicRing.diameter / 2;
+      // 边界检查
+      if (newX < r) newX = r;
+      if (newX > background.clientWidth - r) newX = background.clientWidth - r;
+      if (newY < r) newY = r;
+      if (newY > background.clientHeight - r) newY = background.clientHeight - r;
+
+      assistRing.style.left = (newX - r) + 'px';
+      assistRing.style.top  = (newY - r) + 'px';
+    }
+
+    // 松开鼠标时
+    function onMouseUp(e) {
+      if (!isDragging || !assistRing) return;
+
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      isDragging = false;
+
+      const rect = background.getBoundingClientRect();
+      let finalX = (e.clientX - rect.left) - offsetX;
+      let finalY = (e.clientY - rect.top) - offsetY;
+      const r = basicRing.diameter / 2;
+
+      // 边界检查
+      if (finalX < r) finalX = r;
+      if (finalX > background.clientWidth - r) finalX = background.clientWidth - r;
+      if (finalY < r) finalY = r;
+      if (finalY > background.clientHeight - r) finalY = background.clientHeight - r;
+
+      const centerX = finalX;
+      const centerY = finalY;
+
+      // 判断跟其它圆环的相交面积
+      let assistRadius = r;
+      let assistArea = Math.PI * assistRadius * assistRadius;
+
+      let targetRing = null;
+      for (let cd of circlesData) {
+        if (cd.id === basicRing.id) continue;
+        const d = distance(centerX, centerY, cd.x, cd.y);
+        const area = circleIntersectionArea(assistRadius, cd.diameter/2, d);
+        if (area / assistArea >= 0.6) {
+          targetRing = cd;
+          break;
+        }
+      }
+
+      let basicRingName = getCircleName(basicRing.id);
+      if (targetRing) {
+        let targetRingName = getCircleName(targetRing.id);
+        if (targetRing.diameter > basicRing.diameter) {
+          // 被更大圆吞并
+          recordOperation(`${basicRingName} --> ${targetRingName}`);
+          removeCircle(basicRing);
+        } else if (targetRing.diameter < basicRing.diameter) {
+          // 被更小的圆抵抗
+          recordOperation(`${basicRingName} <-- ${targetRingName}`);
+        } else {
+          // 直径相等
+          recordOperation(`${basicRingName} --X (遇到相同直径 ${targetRingName})`);
+        }
+      } else {
+        // 没有满足 >60% 面积相交的圆
+        recordOperation(`${basicRingName} --X`);
+      }
+
+      // 移除 AssistRing
+      if (assistRing && assistRing.parentNode) {
+        assistRing.parentNode.removeChild(assistRing);
+      }
+      assistRing = null;
+      basicRing = null;
+
+      checkRemainingCircles();
+    }
+
+    // 从DOM与circlesData中移除一个圆
+    function removeCircle(ring) {
+      circlesData = circlesData.filter(cd => cd.id !== ring.id);
+      if (ring.element && ring.element.parentNode) {
+        ring.element.parentNode.removeChild(ring.element);
+      }
+    }
+
+    // 事件：点击“重新生成”按钮
+    refreshBtn.addEventListener('click', generateCircles);
+
+    // 页面初次加载时生成
+    generateCircles();
+  </script>
+</body>
+</html>

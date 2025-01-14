@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Number Connection Test-25C</title>
+  <subtitle>yyy 2025-01-14</subtitle>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    h1 {
+      text-align: center;
+      margin: 16px 0;
+    }
+
+    #test-container {
+      /* 
+        使用 vmin 获取可视区域宽度和高度的最小值
+        宽高都为 80vmin，保证在不同设备上保持正方形
+      */
+      width: 80vmin;
+      height: 80vmin;
+      border: 2px solid #000;
+      margin: 0 auto;         /* 水平居中容器 */
+      position: relative;     /* 为内部绝对定位元素提供定位参考 */
+      box-sizing: border-box;
+      overflow: hidden;       /* 避免溢出 */
+    }
+
+    /* 黑色圆环点的样式 */
+    .point {
+      position: absolute;
+      border: 3px solid black; 
+      border-radius: 50%;
+      background-color: transparent; 
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #000;    /* 字体颜色为黑色 */
+      font-weight: bold;
+      user-select: none; /* 禁止用户选中数字 */
+      cursor: pointer;
+    }
+
+    /* 当正确点击后，填充成黑色，数字变为白色 */
+    .point.correct {
+      background-color: black;
+      color: white;
+      border-color: black;
+    }
+
+    /* 下面的控制面板 */
+    #control-panel {
+      width: 80vmin;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    #refresh-btn {
+      padding: 8px 16px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    /* 只有在测试开始前才显示提示，开始后隐藏 */
+    #message {
+      flex: 1;
+      margin-left: 16px;
+      font-size: 1rem;
+      color: #333;
+    }
+
+    /* 日志输出部分 */
+    #log {
+      width: 80vmin;
+      margin: 16px auto;
+      white-space: pre-wrap; /* 保留换行 */
+      background: #f8f8f8;
+      padding: 8px;
+      border: 1px solid #ccc;
+      font-size: 0.9rem;
+      color: #333;
+      display: none; /* 开始不显示，测试完成后再显示 */
+    }
+  </style>
+</head>
+<body>
+  <h1>Number Connection Test-25C</h1>
+
+  <!-- 测试区域 -->
+  <div id="test-container"></div>
+
+  <!-- 控制按钮和提示信息 -->
+  <div id="control-panel">
+    <button id="refresh-btn">重新开始</button>
+    <div id="message">请按顺序点击数字 1~25</div>
+  </div>
+
+  <!-- 日志输出 -->
+  <div id="log"></div>
+
+  <script>
+    // -----------------------
+    // 配置与数据结构
+    // -----------------------
+    const totalPoints = 25;        // 点的数量从 10 改为 25
+    let circleRadius = 0;          // 圆环半径(px)，在加载后计算
+    let requiredDistance = 0;      // 点与点圆心间的最小距离
+    let containerRect;             // test-container 容器的尺寸
+    let pointsData = [];           // 存储 25 个点 { number, x, y } (像素坐标)
+    let currentNumber = 1;         // 当前要点击的数字，1~25
+    let lastClickedPoint = null;   // 上次正确点击的点({number, x, y})
+    let testStarted = false;       // 是否已经开始（第一次正确点击后设为true）
+    let startTime = 0;             // 开始计时
+    let finished = false;          // 是否完成
+    let logData = [];              // 存储操作日志
+
+    // -----------------------
+    // 页面初始化
+    // -----------------------
+    window.addEventListener('DOMContentLoaded', () => {
+      const container = document.getElementById('test-container');
+      containerRect = container.getBoundingClientRect();
+
+      // 计算圆环半径(px) => 可视区域宽度的 5%
+      // 如果想让圆环更小，可用 0.03，而非 0.05
+      circleRadius = 0.05 * containerRect.width; 
+
+      // 距离要求: 两圆心距离 > 2.3 * circleRadius
+      // 可以酌情调整这个系数以便放置更多的圆
+      requiredDistance = 2.3 * circleRadius;
+
+      // 生成并渲染点
+      generatePoints();
+      renderPoints();
+
+      // 绑定“重新开始”按钮事件
+      const refreshBtn = document.getElementById('refresh-btn');
+      refreshBtn.addEventListener('click', () => {
+        location.reload(); 
+      });
+    });
+
+    // -----------------------
+    // 随机生成 25 个点的圆心坐标，满足间距不重叠 & 完全位于容器内
+    // -----------------------
+    function generatePoints() {
+      const maxAttempts = 10000; // 尝试次数增大，因为 25 个点更难放置
+      let attempts = 0;
+
+      while (pointsData.length < totalPoints && attempts < maxAttempts) {
+        attempts++;
+        // 在 [circleRadius, containerWidth - circleRadius] 范围随机
+        const cx = randomInRange(circleRadius, containerRect.width  - circleRadius);
+        const cy = randomInRange(circleRadius, containerRect.height - circleRadius);
+
+        // 检查是否与已放置的点过近
+        let tooClose = false;
+        for (let p of pointsData) {
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < requiredDistance) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+
+        // 通过检查，可以放置
+        const idx = pointsData.length + 1; // 编号 1~25
+        pointsData.push({ number: idx, x: cx, y: cy });
+      }
+
+      // 如果尝试多次还没生成满 25 个点，视为失败
+      if (pointsData.length < totalPoints) {
+        alert("无法找到足够的空间来放置 25 个圆环，请缩小圆环或减小数量。");
+      }
+    }
+
+    // -----------------------
+    // 在容器中渲染点
+    // -----------------------
+    function renderPoints() {
+      const container = document.getElementById('test-container');
+      container.innerHTML = ""; // 清空
+
+      // 打乱点的顺序，让数字随机分布
+      shuffleArray(pointsData);
+      
+      pointsData.forEach((p) => {
+        const pointEl = document.createElement('div');
+        pointEl.className = 'point';
+
+        // 圆环直径
+        const diameter = circleRadius * 2;
+        pointEl.style.width  = diameter + 'px';
+        pointEl.style.height = diameter + 'px';
+
+        // 字体大小相对于圆环大小，可自行调节
+        pointEl.style.fontSize = (0.6 * circleRadius) + 'px';
+
+        // 将圆心放置到 (p.x, p.y)
+        pointEl.style.left = (p.x - circleRadius) + 'px';
+        pointEl.style.top  = (p.y - circleRadius) + 'px';
+
+        // 显示数字
+        pointEl.textContent = p.number;
+
+        // 点击事件
+        pointEl.addEventListener('click', () => {
+          if (finished) return; // 已完成，不再处理点击
+
+          const currentPoint = { number: p.number, x: p.x, y: p.y };
+
+          if (p.number === currentNumber) {
+            // 正确点击
+            recordLog('correct', currentPoint);
+
+            // 如果是第一次点对，标记 testStarted = true，并隐藏提示
+            if (!testStarted) {
+              testStarted = true;
+              startTime = Date.now();
+              // 隐藏提示
+              document.getElementById('message').style.display = 'none';
+            }
+
+            // 将该点样式变为黑色实心圆
+            pointEl.classList.add('correct');
+
+            lastClickedPoint = currentPoint;
+            currentNumber++;
+
+            // 检查是否完成
+            if (currentNumber > totalPoints) {
+              finished = true;
+              const usedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+
+              // 测试完成后暂时显示完成耗时
+              document.getElementById('message').style.display = 'block';
+              document.getElementById('message').textContent =
+                "恭喜完成！耗时：" + usedTime + " 秒";
+
+              // 显示日志
+              showLog();
+            }
+          } else {
+            // 错误点击
+            recordLog('error', currentPoint);
+
+            // 如果测试尚未开始，则继续在提示中显示“错误点击…”
+            // 测试开始后不再显示任何提示
+            if (!testStarted) {
+              document.getElementById('message').textContent = 
+                "错误点击！当前应点击数字：" + currentNumber;
+            }
+          }
+        });
+
+        container.appendChild(pointEl);
+      });
+    }
+
+    // -----------------------
+    // 记录日志 (含距离 & 角度) - 可与前面示例相同
+    // -----------------------
+    function recordLog(type, currentPoint) {
+      const now = Date.now();
+      let offset = testStarted ? (now - startTime) : 0; 
+      offset = (offset / 1000).toFixed(2);
+
+      let distanceFactor = '-';
+      let angleDeg = '-';
+
+      if (lastClickedPoint) {
+        // 计算像素距离
+        const dx = currentPoint.x - lastClickedPoint.x;
+        const dy = currentPoint.y - lastClickedPoint.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        distanceFactor = (dist / circleRadius).toFixed(2);
+
+        // 计算角度(正右=0°, 正上=90°, ...)
+        const angleRad = Math.atan2(-dy, dx);
+        let deg = angleRad * 180 / Math.PI;
+        if (deg < 0) {
+          deg += 360;  // 保证角度在 [0, 360) 范围
+        }
+        angleDeg = deg.toFixed(2); 
+      }
+
+      if (type === 'correct') {
+        logData.push({
+          type: 'correct',
+          number: currentPoint.number,
+          time: offset,
+          distFactor: distanceFactor,
+          angleDeg: angleDeg
+        });
+      } else {
+        logData.push({
+          type: 'error',
+          clickedNumber: currentPoint.number,
+          shouldClick: currentNumber,
+          time: offset,
+          distFactor: distanceFactor,
+          angleDeg: angleDeg
+        });
+      }
+    }
+
+    // -----------------------
+    // 显示日志
+    // -----------------------
+    function showLog() {
+      const logDiv = document.getElementById('log');
+      logDiv.style.display = 'block'; // 显示日志区
+      let output = "操作日志：\n";
+      logData.forEach((item, idx) => {
+        if (item.type === 'correct') {
+          output += `[${idx+1}] 正确点击数字 ${item.number}，` +
+                    `距离: ${item.distFactor}R，角度: ${item.angleDeg}°，` +
+                    `时间: ${item.time}s\n`;
+        } else {
+          output += `[${idx+1}] 错误点击数字 ${item.clickedNumber} (应点 ${item.shouldClick})，` +
+                    `距离: ${item.distFactor}R，角度: ${item.angleDeg}°，` +
+                    `时间: ${item.time}s\n`;
+        }
+      });
+      logDiv.textContent = output;
+    }
+
+    // -----------------------
+    // 工具函数
+    // -----------------------
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function shuffleArray(array) {
+      let m = array.length;
+      while (m > 0) {
+        const i = Math.floor(Math.random() * m--);
+        [array[m], array[i]] = [array[i], array[m]];
+      }
+      return array;
+    }
+  </script>
+</body>
+</html>

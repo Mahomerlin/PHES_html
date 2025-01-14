@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Number Connection Test-25D</title>
+  <subtitle>yyy 2025-01-14</subtitle>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    h1 {
+      text-align: center;
+      margin: 16px 0;
+    }
+
+    #test-container {
+      width: 80vmin;
+      height: 80vmin;
+      border: 2px solid #000;
+      margin: 0 auto;
+      position: relative;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .point {
+      position: absolute;
+      border: 3px solid black; 
+      border-radius: 50%;
+      background-color: transparent; 
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      color: #000;
+      font-weight: bold;
+      user-select: none;
+      cursor: pointer;
+    }
+
+    .point.correct {
+      background-color: black;
+      color: white;
+      border-color: black;
+    }
+
+    .point.dashed {
+      border-style: dashed;
+    }
+
+    #control-panel {
+      width: 80vmin;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    #refresh-btn {
+      padding: 8px 16px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    #message {
+      flex: 1;
+      margin-left: 16px;
+      font-size: 1rem;
+      color: #333;
+    }
+
+    #log {
+      width: 80vmin;
+      margin: 16px auto;
+      white-space: pre-wrap;
+      background: #f8f8f8;
+      padding: 8px;
+      border: 1px solid #ccc;
+      font-size: 0.9rem;
+      color: #333;
+      display: none;
+    }
+
+    #ghost-ring {
+      position: absolute;
+      border: 3px dashed #f00;
+      border-radius: 50%;
+      pointer-events: none;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Number Connection Test-25D</h1>
+  <div id="test-container">
+    <div id="ghost-ring"></div>
+  </div>
+
+  <div id="control-panel">
+    <button id="refresh-btn">重新开始</button>
+    <div id="message">请从1拖拽到2</div>
+  </div>
+
+  <div id="log"></div>
+
+  <script>
+    const totalPoints = 25;  // 修改点的数量为 25
+    let circleRadius = 0;
+    let requiredDistance = 0;
+    let containerRect;
+    let pointsData = [];
+    let currentNumber = 1;
+    let testStarted = false;
+    let startTime = 0;
+    let finished = false;
+    let logData = [];
+
+    let isDragging = false;
+    let dragStartPoint = null;
+    const ghostRingEl = document.getElementById('ghost-ring');
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const container = document.getElementById('test-container');
+      containerRect = container.getBoundingClientRect();
+
+      circleRadius = 0.05 * containerRect.width; 
+      requiredDistance = 2.3 * circleRadius;
+
+      generatePoints();
+      renderPoints();
+
+      document.getElementById('refresh-btn').addEventListener('click', () => {
+        location.reload();
+      });
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+
+    function generatePoints() {
+      const maxAttempts = 3000;
+      let attempts = 0;
+      while (pointsData.length < totalPoints && attempts < maxAttempts) {
+        attempts++;
+        const cx = randomInRange(circleRadius, containerRect.width - circleRadius);
+        const cy = randomInRange(circleRadius, containerRect.height - circleRadius);
+
+        let tooClose = false;
+        for (let p of pointsData) {
+          const dx = p.x - cx;
+          const dy = p.y - cy;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < requiredDistance) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+
+        const idx = pointsData.length + 1; 
+        pointsData.push({ number: idx, x: cx, y: cy });
+      }
+
+      if (pointsData.length < totalPoints) {
+        alert("无法生成足够多的点，请调整参数。");
+      }
+
+      shuffleArray(pointsData);
+    }
+
+    function renderPoints() {
+      const container = document.getElementById('test-container');
+      container.innerHTML = "";
+      container.appendChild(ghostRingEl);
+
+      pointsData.forEach((p) => {
+        const pointEl = document.createElement('div');
+        pointEl.className = 'point';
+        const diameter = circleRadius * 2;
+        pointEl.style.width = diameter + 'px';
+        pointEl.style.height = diameter + 'px';
+        pointEl.style.fontSize = (0.8 * circleRadius) + 'px';
+        pointEl.style.left = (p.x - circleRadius) + 'px';
+        pointEl.style.top = (p.y - circleRadius) + 'px';
+        pointEl.textContent = p.number;
+
+        pointEl.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          if (finished) return;
+
+          if (p.number === currentNumber) {
+            startDragging(p, e.clientX, e.clientY);
+          }
+        });
+
+        container.appendChild(pointEl);
+      });
+    }
+
+    function startDragging(pointData, mouseX, mouseY) {
+      isDragging = true;
+      dragStartPoint = pointData;
+
+      if (!testStarted) {
+        testStarted = true;
+        startTime = Date.now();
+        document.getElementById('message').style.display = 'none';
+      }
+
+      const diameter = circleRadius * 2;
+      ghostRingEl.style.width = diameter + 'px';
+      ghostRingEl.style.height = diameter + 'px';
+      ghostRingEl.style.display = 'block';
+      positionGhostRing(mouseX, mouseY);
+    }
+
+    function onMouseMove(e) {
+      if (!isDragging) return;
+      positionGhostRing(e.clientX, e.clientY);
+    }
+
+    function positionGhostRing(mouseX, mouseY) {
+      const offsetX = mouseX - containerRect.left;
+      const offsetY = mouseY - containerRect.top;
+      ghostRingEl.style.left = (offsetX - circleRadius) + 'px';
+      ghostRingEl.style.top  = (offsetY - circleRadius) + 'px';
+    }
+
+    function onMouseUp(e) {
+      if (!isDragging) return;
+      isDragging = false;
+      ghostRingEl.style.display = 'none';
+
+      const nextNumber = currentNumber + 1;
+      const nextPoint = pointsData.find(p => p.number === nextNumber);
+      if (!nextPoint) return;
+
+      const mouseX = e.clientX - containerRect.left;
+      const mouseY = e.clientY - containerRect.top;
+
+      const dist = getDistance(mouseX, mouseY, nextPoint.x, nextPoint.y);
+      const intersectionArea = getCircleIntersectionArea(dist, circleRadius, circleRadius);
+      const circleArea = Math.PI * circleRadius * circleRadius;
+      const ratio = intersectionArea / circleArea;
+
+      if (ratio > 0.1) {
+        markPointCorrect(dragStartPoint.number);
+        markPointDashed(nextNumber);
+
+        currentNumber++;
+        if (currentNumber >= totalPoints) {
+          finished = true;
+          const usedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+          const msgEl = document.getElementById('message');
+          msgEl.style.display = 'block';
+          msgEl.textContent = "恭喜完成！耗时：" + usedTime + " 秒";
+          showLog();
+        } else {
+          const msgEl = document.getElementById('message');
+          msgEl.style.display = 'block';
+          msgEl.textContent = 
+            "请从 " + currentNumber + " 拖拽到 " + (currentNumber + 1);
+        }
+      } else {
+        const msgEl = document.getElementById('message');
+        msgEl.style.display = 'block';
+        msgEl.textContent = 
+          "连接失败！请从 " + currentNumber + " 再次拖拽到 " + (currentNumber+1);
+      }
+    }
+
+    function markPointCorrect(num) {
+      const container = document.getElementById('test-container');
+      const pointsEls = container.querySelectorAll('.point');
+      pointsEls.forEach(el => {
+        if (el.textContent == num) {
+          el.classList.add('correct');
+        }
+      });
+    }
+
+    function markPointDashed(num) {
+      const container = document.getElementById('test-container');
+      const pointsEls = container.querySelectorAll('.point');
+      pointsEls.forEach(el => {
+        if (el.textContent == num) {
+          el.classList.add('dashed');
+        }
+      });
+    }
+
+    function getDistance(x1, y1, x2, y2) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      return Math.sqrt(dx*dx + dy*dy);
+    }
+
+    function getCircleIntersectionArea(d, r1, r2) {
+      if (d >= r1 + r2) return 0;
+      if (d <= Math.abs(r1 - r2)) {
+        const rMin = Math.min(r1, r2);
+        return Math.PI * rMin * rMin;
+      }
+      const r1Sq = r1 * r1;
+      const r2Sq = r2 * r2;
+      const alpha = Math.acos((d*d + r1Sq - r2Sq) / (2*d*r1)) * 2;
+      const beta  = Math.acos((d*d + r2Sq - r1Sq) / (2*d*r2)) * 2;
+      const area1 = 0.5 * r1Sq * (alpha - Math.sin(alpha));
+      const area2 = 0.5 * r2Sq * (beta - Math.sin(beta));
+      return area1 + area2;
+    }
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function shuffleArray(array) {
+      let m = array.length;
+      while (m > 0) {
+        const i = Math.floor(Math.random() * m--);
+        [array[m], array[i]] = [array[i], array[m]];
+      }
+      return array;
+    }
+  </script>
+</body>
+</html>
