@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NCT-B-24D</title>
+  <subtitle>yyy 2025-01-15</subtitle>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: Arial, sans-serif;
+      user-select: none;
+    }
+    h1 {
+      margin-top: 1rem;
+    }
+    #container {
+      position: relative;
+      width: 85vmin;
+      height: 85vmin;
+      border: 2px solid black;
+      margin-top: 1rem;
+      overflow: hidden; /* 确保圆环不会溢出可视区域 */
+    }
+    .ring {
+      position: absolute;
+      width: 10vmin;  /* 直径 = 2 * 5vmin */
+      height: 10vmin;
+      border: 2px solid black;
+      border-radius: 50%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 3vmin;
+      font-weight: bold;
+      background-color: white; /* 圆环内部底色 */
+      cursor: grab;
+    }
+    .ring.solid {
+      background-color: black;
+      color: white;
+      cursor: not-allowed; /* 不可再拖动 */
+    }
+    .assist-ring {
+      position: absolute;
+      width: 10vmin;
+      height: 10vmin;
+      border: 2px dashed black;
+      border-radius: 50%;
+      pointer-events: none; /* 避免自身干扰鼠标事件 */
+    }
+    #controls {
+      margin-top: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    #reset-button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    #info {
+      font-size: 1rem;
+      max-width: 60vw;
+    }
+  </style>
+</head>
+<body>
+  <h1>NCT-B-24D</h1>
+  <div id="container"></div>
+  <div id="controls">
+    <button id="reset-button">刷新 (Reset)</button>
+    <div id="info">
+      拖动任意圆环，寻找与其对应的字母或数字
+    </div>
+  </div>
+
+  <script>
+    /***********************************************
+     *                  全局变量声明
+     ***********************************************/
+    const container = document.getElementById("container");
+    const resetButton = document.getElementById("reset-button");
+    const info = document.getElementById("info");
+
+    // 圆环相关
+    const RADIUS_VMIN = 5;               // 单个圆环半径（vmin）
+    const DIAMETER_VMIN = RADIUS_VMIN * 2;
+    const MIN_DIST = RADIUS_VMIN * 2.2;  // 圆心间最小距离 > 2.2 * 半径
+    const PADDING = RADIUS_VMIN;         // 防止圆环贴边（简化，这里只做最小半径限制）
+    const TOTAL_COUNT = 24;              // 总圆环数
+    const NUM_COUNT = 12;                // number 组圆环数量
+    const ALPHA_COUNT = 12;             // alpha 组圆环数量
+
+    // 统计 & 记录
+    let startTime = null;
+    let invalidOps = 0;  // 无效操作次数（相交面积 < 10%）
+    let failedOps = 0;   // 失败操作次数（映射不对应）
+    const actionLogs = []; // 用于记录所有操作日志
+    
+    // 判断是否所有圆环都变成实心
+    function checkAllSolid() {
+      const rings = document.querySelectorAll(".ring");
+      return Array.from(rings).every(r => r.classList.contains("solid"));
+    }
+
+    // 弹窗输出后台信息
+    function showFinalResult() {
+      const totalTime = ((performance.now() - startTime) / 1000).toFixed(2);
+      let message = `交互已全部结束！\n`;
+      message += `总耗时：${totalTime} 秒\n`;
+      message += `无效操作总次数：${invalidOps}\n`;
+      message += `失败操作总次数：${failedOps}\n\n`;
+      message += `【操作日志 - 按时间顺序】\n`;
+      actionLogs.forEach((log, idx) => {
+        message += `${idx + 1}. [${log.timeOffset}s] ${log.description}\n`;
+      });
+      alert(message);
+    }
+
+    /***********************************************
+     *          圆环生成 & 位置摆放逻辑
+     ***********************************************/
+    // 存储圆环信息
+    // 每个元素格式: { x, y, type, value, element, isSolid }
+    const ringDataList = [];
+
+    // 生成随机位置
+    // 要保证中心点在 [PADDING, 85 - PADDING] 范围内
+    function getRandomPosition() {
+      const min = PADDING;
+      const max = 85 - PADDING;
+      const x = Math.random() * (max - min) + min;
+      const y = Math.random() * (max - min) + min;
+      return { x, y };
+    }
+
+    // 判断新圆与已有圆距离是否合格
+    function isValidPosition(x, y) {
+      for (let data of ringDataList) {
+        const dx = data.x - x;
+        const dy = data.y - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < MIN_DIST) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // 根据索引生成文字：前12个生成数字1-12，后12个生成字母A-L
+    function getRingLabel(index) {
+      if (index < NUM_COUNT) {
+        return (index + 1).toString();
+      } else {
+        // A 的 ASCII 码是 65
+        return String.fromCharCode(65 + (index - NUM_COUNT));
+      }
+    }
+
+    // 判断圆环类型：前12个是 number，后12个是 alpha
+    function getRingType(index) {
+      return index < NUM_COUNT ? "number" : "alpha";
+    }
+
+    // 创建一个圆环 DOM
+    function createRingDom(label) {
+      const ring = document.createElement("div");
+      ring.classList.add("ring");
+      ring.textContent = label;
+      return ring;
+    }
+
+    // 初始化生成 24 个圆环
+    function initRings() {
+      let created = 0;
+      while (created < TOTAL_COUNT) {
+        const { x, y } = getRandomPosition();
+        if (isValidPosition(x, y)) {
+          const label = getRingLabel(created);
+          const type = getRingType(created);
+
+          // 创建DOM并设置样式
+          const ringEl = createRingDom(label);
+          // 将圆心(x, y)转换为 left/top
+          // 这里让 (x,y) 表示中心点，则 left= x - RADIUS_VMIN, top= y - RADIUS_VMIN
+          ringEl.style.left = `calc(${x}vmin - ${RADIUS_VMIN}vmin)`;
+          ringEl.style.top = `calc(${y}vmin - ${RADIUS_VMIN}vmin)`;
+          container.appendChild(ringEl);
+
+          ringDataList.push({
+            x,
+            y,
+            type,
+            value: label,
+            element: ringEl,
+            isSolid: false
+          });
+          created++;
+        }
+      }
+    }
+
+    /***********************************************
+     *            圆与圆相交面积计算
+     ***********************************************/
+    // 计算两圆的相交面积
+    // r = 两个圆的半径(像素)，d = 圆心距离(像素)
+    // 参考公式: https://mathworld.wolfram.com/Circle-CircleIntersection.html
+    function circleIntersectionArea(r, d) {
+      if (d >= 2 * r) {
+        // 相距大于等于直径则不相交
+        return 0;
+      }
+      if (d <= 0) {
+        // 圆心重合则交集为整圆
+        return Math.PI * r * r;
+      }
+      const r2 = r * r;
+      const alpha = Math.acos((d * d + r2 - r2) / (2 * d * r)); // 对于等半径，稍作简化
+      // 实际上两个圆同半径 => alpha1=alpha2
+      // 相交面积 = 2 * (r^2 * alpha - r^2 * sin(2*alpha)/2 )
+      //         = 2r^2( alpha - sin(2alpha)/2 )
+      return 2 * r2 * (alpha - Math.sin(2 * alpha) / 2);
+    }
+
+    // 判断两个圆环 DOM 的相交面积是否 > circleArea * 0.1
+    function isIntersectMoreThan10Percent(ringA, ringB) {
+      const rectA = ringA.getBoundingClientRect();
+      const rectB = ringB.getBoundingClientRect();
+      // 容器的宽度，用来换算 px -> vmin
+      const containerRect = container.getBoundingClientRect();
+
+      // 圆环实际半径(px)：容器里 85vmin 对应 containerRect.width(px)
+      // 1 vmin 对应多少 px？
+      const pxPerVmin = containerRect.width / 85;
+      const rPx = RADIUS_VMIN * pxPerVmin;
+
+      // 计算圆心坐标(像素)
+      const centerAx = rectA.left + rectA.width / 2;
+      const centerAy = rectA.top + rectA.height / 2;
+      const centerBx = rectB.left + rectB.width / 2;
+      const centerBy = rectB.top + rectB.height / 2;
+
+      // 圆心距离
+      const dx = centerAx - centerBx;
+      const dy = centerAy - centerBy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // 两圆交集面积
+      const intersectArea = circleIntersectionArea(rPx, dist);
+      // 整个圆面积
+      const fullArea = Math.PI * rPx * rPx;
+      // 大于 10%？
+      return intersectArea >= 0.1 * fullArea;
+    }
+
+    /***********************************************
+     *           拖拽 + 判定 + 映射关系
+     ***********************************************/
+    let currentBaseRing = null;       // 被拖动的 BaseRing
+    let assistRingEl = null;          // 虚线圆环
+    let hasStarted = false;           // 是否已经开始交互
+
+    // 判断映射是否正确
+    // 规则：1->A, 2->B, ... 12->L
+    // baseType = "number" & baseValue = 1~12 => targetType="alpha" & targetValue=A~L, 
+    // 或反过来 alpha->number
+    function isMapped(baseType, baseValue, targetType, targetValue) {
+      if (baseType === "number" && targetType === "alpha") {
+        // number 对应 alpha
+        const numVal = parseInt(baseValue, 10);     // 1~12
+        const alphaIdx = targetValue.charCodeAt(0) - 64; // A->1, B->2, ...
+        return numVal === alphaIdx;
+      } else if (baseType === "alpha" && targetType === "number") {
+        // alpha 对应 number
+        const alphaIdx = baseValue.charCodeAt(0) - 64;
+        const numVal = parseInt(targetValue, 10);
+        return alphaIdx === numVal;
+      }
+      return false;
+    }
+
+    // 监听鼠标按下
+    container.addEventListener("mousedown", (e) => {
+      // 若尚未开始交互，记录开始时间并去除提示
+      if (!hasStarted) {
+        startTime = performance.now();
+        info.textContent = "";
+        hasStarted = true;
+      }
+      const ringEl = e.target.closest(".ring");
+      if (!ringEl) return; // 点击到空白处
+
+      // 如果是已固化(实心)的圆，则无法拖动
+      if (ringEl.classList.contains("solid")) return;
+
+      currentBaseRing = ringEl;
+
+      // 创建辅助圆
+      assistRingEl = document.createElement("div");
+      assistRingEl.classList.add("assist-ring");
+      // 初始位置跟随鼠标
+      assistRingEl.style.left = `${e.clientX - rectCenterOffset()}px`;
+      assistRingEl.style.top = `${e.clientY - rectCenterOffset()}px`;
+      document.body.appendChild(assistRingEl);
+
+      // 监听鼠标移动
+      document.addEventListener("mousemove", onMouseMove);
+      // 监听鼠标松开
+      document.addEventListener("mouseup", onMouseUp);
+    });
+
+    // 计算辅助圆相对于其左上顶点的偏移（半径）
+    function rectCenterOffset() {
+      // 虚线圆环的宽/高(10vmin)在 px 中的半径
+      const containerRect = container.getBoundingClientRect();
+      const pxPerVmin = containerRect.width / 85;
+      return (DIAMETER_VMIN / 2) * pxPerVmin; // 10vmin/2
+    }
+
+    // 鼠标移动时，让 assistRing 跟随
+    function onMouseMove(e) {
+      if (!assistRingEl) return;
+      assistRingEl.style.left = `${e.clientX - rectCenterOffset()}px`;
+      assistRingEl.style.top = `${e.clientY - rectCenterOffset()}px`;
+    }
+
+    // 鼠标松开时，判断和其他圆环是否相交超过10%
+    function onMouseUp(e) {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+
+      if (!assistRingEl || !currentBaseRing) return;
+
+      // 判断相交
+      const allRings = document.querySelectorAll(".ring");
+      let intersectedRing = null;
+      for (let r of allRings) {
+        if (r === currentBaseRing || r.classList.contains("solid")) continue;
+        if (isIntersectMoreThan10Percent(assistRingEl, r)) {
+          intersectedRing = r;
+          break; // 默认只处理与第一个满足条件的圆环
+        }
+      }
+
+      // 时间差(秒)
+      const timeOffset = ((performance.now() - startTime) / 1000).toFixed(2);
+      const baseVal = currentBaseRing.textContent;
+      // 找到 baseRing 的数据
+      const baseData = ringDataList.find(d => d.element === currentBaseRing);
+
+      if (!intersectedRing) {
+        // 无效操作
+        invalidOps++;
+        actionLogs.push({
+          timeOffset,
+          description: `[无效] ${baseVal} 未与任何圆环或相交不足10%`
+        });
+        // 移除 assistRing
+        assistRingEl.remove();
+      } else {
+        // 存在交集圆环
+        const targetVal = intersectedRing.textContent;
+        const targetData = ringDataList.find(d => d.element === intersectedRing);
+
+        // 判断是否映射成功
+        if (isMapped(baseData.type, baseData.value, targetData.type, targetVal)) {
+          // 成功操作：变为黑色实心圆，不可再被拖动
+          currentBaseRing.classList.add("solid");
+          intersectedRing.classList.add("solid");
+
+          baseData.isSolid = true;
+          targetData.isSolid = true;
+
+          // 记录日志
+          actionLogs.push({
+            timeOffset,
+            description: `[成功] ${baseVal} -> ${targetVal}`
+          });
+
+          // 移除 assistRing
+          assistRingEl.remove();
+
+          // 检查是否全部结束
+          if (checkAllSolid()) {
+            showFinalResult();
+          }
+        } else {
+          // 失败操作
+          failedOps++;
+          actionLogs.push({
+            timeOffset,
+            description: `[失败] ${baseVal} -> ${targetVal}`
+          });
+          // 移除 assistRing
+          assistRingEl.remove();
+        }
+      }
+
+      // 清理引用
+      currentBaseRing = null;
+      assistRingEl = null;
+    }
+
+    /***********************************************
+     *               刷新逻辑
+     ***********************************************/
+    function resetGame() {
+      // 清空
+      container.innerHTML = "";
+      ringDataList.length = 0;
+      actionLogs.length = 0;
+      invalidOps = 0;
+      failedOps = 0;
+      startTime = null;
+      hasStarted = false;
+      info.textContent = "拖动圆环，连接1-12数字与其对应的A-L字母（无顺序和前后要求）";
+
+      // 重新生成
+      initRings();
+    }
+
+    resetButton.addEventListener("click", resetGame);
+
+    /***********************************************
+     *             初始化入口
+     ***********************************************/
+    // 首次进入时，生成圆环
+    initRings();
+  </script>
+</body>
+</html>
