@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCT-10 Mobile demo</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100%;
+            touch-action: none; /* 禁用触摸屏幕滚动 */
+        }
+        #workspace {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 95vw;
+            height: 95vw;
+            max-width: 95vh;
+            max-height: 95vh;
+            border: 0.5vw solid black;
+            box-sizing: border-box;
+        }
+        .circle {
+            position: absolute;
+            width: 10vw;
+            height: 10vw;
+            border-radius: 50%;
+            background-color: transparent;
+            border: 0.5vw solid black;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: black;
+            font-size: 5vw;
+            cursor: pointer;
+        }
+        .dashed-line {
+            position: absolute;
+            border: 1px dashed grey;
+            pointer-events: none;
+        }
+        #operationResult {
+            position: fixed;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white;
+            border: 2px solid black;
+            width: 80vw;
+            height: 60vh;
+            overflow: auto;
+            padding: 20px;
+            display: none;
+            z-index: 100;
+        }
+        #operationResult textarea {
+            width: 100%;
+            height: 70%;
+            font-family: monospace;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        #copy-btn, #close-btn {
+            display: block;
+            margin: 10px auto;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #copy-btn:hover, #close-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="workspace"></div>
+    <div id="operationResult">
+        <textarea id="operation-summary" readonly></textarea>
+        <button id="copy-btn">复制数据</button>
+        <button id="close-btn">关闭</button>
+    </div>
+    <script>
+        const workspace = document.getElementById("workspace");
+        const circles = [];
+        let currentDragCircle = null;
+        let gameData = [];
+        let gameStartTime = Date.now();
+        let operationData = [];
+        let operationStartTime = 0;
+        let gameEndTime = 0;
+
+        // 获取相对测试开始的时间戳（以秒为单位）
+        function getRelativeTimestamp(ms) {
+            return ((ms - gameStartTime) / 1000).toFixed(2);
+        }
+
+        // 检查两个圆环是否重叠
+        function isOverlapping(newCircle) {
+            return circles.some(circle => {
+                const radius = parseFloat(circle.style.width) / 2;
+                const newCircleRadius = parseFloat(newCircle.style.width) / 2;
+                const x1 = parseFloat(circle.style.left) + radius;
+                const y1 = parseFloat(circle.style.top) + radius;
+                const x2 = parseFloat(newCircle.style.left) + newCircleRadius;
+                const y2 = parseFloat(newCircle.style.top) + newCircleRadius;
+                const distance = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+                return distance < radius * 2.5 + newCircleRadius;
+            });
+        }
+
+        // 检查圆环是否在workspace内
+        function isInsideWorkspace(circle) {
+            const radius = parseFloat(circle.style.width) / 2;
+            const x = parseFloat(circle.style.left);
+            const y = parseFloat(circle.style.top);
+            return x >=  1.5 * radius && y >= 1.5 * radius && x + 2.5 * radius <= workspace.offsetWidth && y + 2.5 * radius <= workspace.offsetHeight;
+        }
+
+        // 创建一个不重叠且完全处于workspace内的圆环
+        function createCircle(id) {
+            const radius = 5 * (workspace.offsetWidth / 100);
+            let circle = document.createElement("div");
+            circle.classList.add("circle");
+            circle.id = `ring-${id}`;
+            circle.style.width = `${2 * radius}px`;
+            circle.style.height = `${2 * radius}px`;
+
+            let x, y;
+            do {
+                x = Math.random() * (workspace.offsetWidth - 2 * radius);
+                y = Math.random() * (workspace.offsetHeight - 2 * radius);
+                circle.style.left = `${x}px`;
+                circle.style.top = `${y}px`;
+            } while (isOverlapping(circle) || !isInsideWorkspace(circle));
+
+            circle.dataset.id = id;
+            circle.textContent = id;  // 圆环显示数字
+            workspace.appendChild(circle);
+            circles.push(circle);
+        }
+
+        // 创建10个圆环
+        for (let i = 1; i <= 10; i++) {
+            createCircle(i);
+        }
+
+        // 检查两个圆环的距离
+        function distance(circleA, circleB) {
+            const x1 = parseFloat(circleA.style.left);
+            const y1 = parseFloat(circleA.style.top);
+            const x2 = parseFloat(circleB.style.left);
+            const y2 = parseFloat(circleB.style.top);
+            return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+        }
+
+        // 触摸开始事件
+        workspace.addEventListener("touchstart", function(event) {
+            if (event.touches.length > 1) return; // 禁用多点触控
+            const touch = event.touches[0];
+            const target = touch.target;
+            
+            if (target.classList.contains("circle")) {
+                const minCircle = circles.reduce((prev, curr) => {
+                    return parseInt(curr.dataset.id) < parseInt(prev.dataset.id) ? curr : prev;
+                });
+
+                if (target === minCircle) {
+                    currentDragCircle = target;
+                    currentDragCircle.classList.add("dragging");
+                    operationStartTime = Date.now(); // 开始新的操作环节计时
+                    operationData.push({
+                        operationId: minCircle.dataset.id,
+                        startTime: operationStartTime,
+                        trajectory: [],
+                        dragCount: 0,
+                        startCircle: { x: parseFloat(minCircle.style.left), y: parseFloat(minCircle.style.top) }
+                    });
+                }
+            }
+        });
+
+        // 触摸移动事件
+        workspace.addEventListener("touchmove", function(event) {
+            if (!currentDragCircle || event.touches.length > 1) return; // 禁用多点触控
+            const touch = event.touches[0];
+            currentDragCircle.style.left = `${touch.pageX - workspace.offsetLeft - currentDragCircle.offsetWidth / 2}px`;
+            currentDragCircle.style.top = `${touch.pageY - workspace.offsetTop - currentDragCircle.offsetHeight / 2}px`;
+
+            // 减少轨迹记录
+            if (operationData[operationData.length - 1].dragCount % 10 <1) {
+                operationData[operationData.length - 1].trajectory.push({
+                    time: Date.now(),
+                    x: currentDragCircle.style.left,
+                    y: currentDragCircle.style.top,
+                    timestamp: getRelativeTimestamp(Date.now()) // 使用相对时间戳
+                });
+            }
+
+            // 更新拖动计数
+            operationData[operationData.length - 1].dragCount++;
+
+            // 绘制虚线轨迹
+            const dashedLine = document.createElement("div");
+            dashedLine.classList.add("dashed-line");
+            dashedLine.style.left = `${touch.pageX - workspace.offsetLeft}px`;
+            dashedLine.style.top = `${touch.pageY - workspace.offsetTop}px`;
+            workspace.appendChild(dashedLine);
+        });
+
+        // 触摸结束事件
+        workspace.addEventListener("touchend", function(event) {
+            if (currentDragCircle) {
+                const minCircle = circles.reduce((prev, curr) => {
+                    return parseInt(curr.dataset.id) < parseInt(prev.dataset.id) ? curr : prev;
+                });
+                const targetCircle = circles.find(c => parseInt(c.dataset.id) === parseInt(minCircle.dataset.id) + 1);
+                
+                if (distance(currentDragCircle, targetCircle) < 1.0 * (parseFloat(currentDragCircle.style.width) / 2)) {
+                    operationData[operationData.length - 1].endTime = Date.now(); // 操作环节结束时记录时间
+                    operationData[operationData.length - 1].endCircle = { x: parseFloat(targetCircle.style.left), y: parseFloat(targetCircle.style.top) };
+                    currentDragCircle.remove();
+                    circles.splice(circles.indexOf(currentDragCircle), 1);
+                    currentDragCircle = null;
+                }
+            }
+        });
+
+        // 测试结束判断
+        function checkGameEnd() {
+            if (circles.length <= 1) {
+                if (!gameEndTime) {
+                    gameEndTime = Date.now(); // 记录测试结束时间
+                }
+                const totalDuration = getRelativeTimestamp(gameEndTime); // 总耗时（秒）
+
+                // 汇总每个操作环节的耗时和轨迹信息
+                operationData.forEach(op => {
+                    op.duration = getRelativeTimestamp(op.endTime);
+                });
+
+                // 测试结束时，显示可编辑文本框
+                const opSummary = document.getElementById("operation-summary");
+                let summaryText = `测试总耗时：${totalDuration}秒\n`;
+                summaryText += `测试者编号:id------id\n测试时间:date-----date\n` 
+                operationData.forEach(op => {
+                    summaryText += `操作环节 ${op.operationId}:\n`;
+                    summaryText += `  耗时：${op.duration}秒\n`;
+                    summaryText += `  起点圆环坐标：(${op.startCircle.x}, ${op.startCircle.y})\n`;
+                    summaryText += `  终点圆环坐标：(${op.endCircle.x}, ${op.endCircle.y})\n`;
+                    summaryText += `  拖动次数：${op.dragCount}\n`;
+                    op.trajectory.forEach((point, index) => {
+                        summaryText += `    轨迹点 ${index + 1}: 坐标(${point.x}, ${point.y}), 时间戳：${point.timestamp}秒\n`;
+                    });
+                    summaryText += `\n`;
+                });
+                opSummary.value = summaryText;
+
+                // 显示弹窗
+                document.getElementById("operationResult").style.display = "block";
+            }
+        }
+
+        setInterval(checkGameEnd, 1000); // 每秒检查测试是否结束
+
+        // 复制数据按钮事件
+        document.getElementById("copy-btn").addEventListener("click", function() {
+            const opSummary = document.getElementById("operation-summary").value;
+            navigator.clipboard.writeText(opSummary).then(function() {
+                alert("数据已复制到剪贴板！");
+            });
+        });
+
+        // 关闭弹窗按钮事件
+        document.getElementById("close-btn").addEventListener("click", function() {
+            document.getElementById("operationResult").style.display = "none";
+        });
+    </script>
+</body>
+</html>
