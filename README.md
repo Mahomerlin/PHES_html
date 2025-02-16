@@ -22,5 +22,10 @@ PHES includes **five paper-and-pencil tests** that assess various cognitive doma
 - Raw scores are compared against normative data (adjusted for age and education).
 - The final **PHES score** is derived by summing the deviations of test scores from the normative range. A negative total score indicates cognitive impairment.
 
+### 目标:
+- 使用PC和移动端设备进行PHES；
+- 基于传统PHES，探索适合移动端设备操作的HE诊断工具；
+
+
 ## 中文关键词：
 肝性脑病, 肝硬化, 肝性脑病心理测量评分, 计算心理学量表
